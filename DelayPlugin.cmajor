@@ -1,0 +1,118 @@
+graph DelayPlugin [[ main ]]
+{
+    input stream float inLeft;
+    input stream float inRight;
+    input delay.delayTime DelayTime [[ min: 0.0, max: 1000.0, init: 1000.0 ]];
+    input delay.feedback Feedback [[ min: 0.0, max: 1.0, init: 0.5 ]]; 
+    input delay.wetLevel WetLevel [[ min: 0.0, max: 1.0, init: 0.5 ]];
+    input delay.delayTimeLocked DelayTimeLocked [[min: 0.0, max: 16.0, init: 0.0, step: 1]];
+    input delay.bypass Bypass;
+    input delay.useTempo UseTempo;
+    input event std::timeline::Tempo tempo;
+    output stream float outLeft;
+    output stream float outRight;
+
+    node delay = Delay;
+    
+    connection tempo -> delay.tempoIn;
+    connection inLeft -> delay.inLeft;
+    connection inRight -> delay.inRight;
+    connection delay.outLeft -> outLeft;
+    connection delay.outRight -> outRight;
+}
+
+processor Delay {
+    input stream float inLeft;
+    input stream float inRight;
+    input event float32 delayTime [[name: "delay time", min: 0.0, max: 1000.0, init: 50.0 ]];
+    input event float32 feedback [[name: "feedback", min: 0.0, max: 1.0, init: 0.5 ]]; 
+    input event float32 wetLevel [[name: "wet level", min: 0.0, max: 1.0, init: 0.5 ]];
+    input event float32 delayTimeLocked [[name: "delay time locked", min: 0.0, max: 16.0, init: 0.0, step: 1]];
+    input event bool bypass [[name: "bypass"]];
+    input event bool useTempo [[name: "use tempo"]];
+    input event std::timeline::Tempo tempoIn;
+    output stream float outLeft;
+    output stream float outRight;
+
+    const int maxDelaySamples = 44100;
+    float[maxDelaySamples] bufferLeft;
+    float[maxDelaySamples] bufferRight;
+
+    wrap<maxDelaySamples> writeIndex = 0;
+    int delaySamples = 0;
+
+    float32 currentDelayTime = 50.0f;
+    float32 currentFeedback = 0.5f;
+    float32 currentWetLevel = 0.5f;
+    float32 currentDelayTimeLocked = 0.0f;
+    bool currentBypass = false;
+    bool currentUseTempo = false;
+    std::timeline::Tempo tempo;
+
+    event tempoIn (std::timeline::Tempo t) 
+    {
+        tempo = t; 
+        updateDelaySamples();
+    }
+
+    event delayTime (float32 value) {
+        currentDelayTime = value;
+        updateDelaySamples();
+    }
+
+    event feedback (float32 value) {
+        currentFeedback = value;
+    }
+
+    event wetLevel (float32 value) {
+        currentWetLevel = value;
+    }
+
+    event delayTimeLocked (float32 value) {
+        currentDelayTimeLocked = value;
+        updateDelaySamples();
+    }
+
+    event bypass (bool value) {
+        currentBypass = value;
+    }
+
+    event useTempo (bool value) {
+        currentUseTempo = value;
+        updateDelaySamples();
+    }
+
+    void updateDelaySamples() {
+        if (currentUseTempo) {
+            float32 secondsPerBeat = std::timeline::secondsPerBeat(tempo); 
+            float32 adjustedDelayTime = secondsPerBeat * (4.0f / currentDelayTimeLocked) * 1000.0f; 
+            delaySamples = int(adjustedDelayTime * 44.1f + 0.5f);
+        } else {
+            delaySamples = int(currentDelayTime * 44.1f + 0.5f);
+        }
+    }
+
+    void main() {
+        loop {
+            if (currentBypass) {
+                outLeft <- inLeft;
+                outRight <- inRight;
+            } else {
+                wrap<maxDelaySamples> readIndex = wrap<maxDelaySamples>((writeIndex - delaySamples + maxDelaySamples) % maxDelaySamples);
+                
+                float delayedLeft = bufferLeft[readIndex];
+                float delayedRight = bufferRight[readIndex];
+                
+                bufferLeft[writeIndex] = inLeft + currentFeedback * delayedLeft;
+                bufferRight[writeIndex] = inRight + currentFeedback * delayedRight;
+
+                outLeft <- float32(currentWetLevel * delayedLeft + (1.0f - currentWetLevel) * inLeft);
+                outRight <- float32(currentWetLevel * delayedRight + (1.0f - currentWetLevel) * inRight);
+
+                writeIndex = wrap<maxDelaySamples>((writeIndex + 1) % maxDelaySamples);
+            }
+            advance();
+        }
+    }
+}
+ 
