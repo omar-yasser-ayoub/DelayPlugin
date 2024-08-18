@@ -13,12 +13,30 @@ graph DelayPlugin [[ main ]]
     output stream float outRight;
 
     node delay = Delay;
+    node eq = EQ;
     
     connection tempo -> delay.tempoIn;
     connection inLeft -> delay.inLeft;
     connection inRight -> delay.inRight;
-    connection delay.outLeft -> outLeft;
-    connection delay.outRight -> outRight;
+    connection delay.outLeft -> eq.inLeft;
+    connection delay.outRight -> eq.inRight;
+    connection eq.outLeft -> outLeft;
+    connection eq.outRight -> outRight;
+}
+processor EQ {
+    input stream float inLeft;
+    input stream float inRight;
+
+    output stream float outLeft;
+    output stream float outRight;
+
+    void main(){
+        loop {
+            outLeft <- inLeft;
+            outRight <- inRight;
+            advance();
+        }
+    }
 }
 
 processor Delay {
@@ -115,4 +133,3 @@ processor Delay {
         }
     }
 }
- 
